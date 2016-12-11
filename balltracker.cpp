@@ -1,272 +1,163 @@
 #include "balltracker.h"
 #include <tuple>
-////include "opencv2/bgsegm.hpp"
+#include <QImage>
+#include <QPainter>
 using namespace std;
 
-BallTracker::BallTracker() : numballs(3)
+BallTracker::BallTracker(String ballColor) : numballs(1)
 {
-    colors["darkGreen"] = new hsvRange(35,50,20,80,255,120);
-    colors["green"] = new hsvRange(30,0,0,100,255,255);
-    colors["white"] = new hsvRange(0,0,80,255,50,120);
-    colors["yellow"] = new hsvRange(15, 204, 204,20, 255, 255);
-    colors["red"] = new hsvRange(0, 153, 127,4, 230, 179);
-    colors["orange"] =  new hsvRange(15, 204, 204,20, 255, 255);
-    colors["darkYellow"] = new hsvRange(20, 115, 140,25, 205, 230);
-    colors["darkYellowAttempt2(isolating)"] = new  hsvRange(20, 90, 117,32, 222, 222);
-    colors["orange2"] = new hsvRange(2, 150, 140,19, 255, 204);
+    colors["DarkGreen"] = make_pair(Scalar(35,50,20),Scalar(80,255,120));
+    colors["Green"] = make_pair(Scalar(30,0,0),Scalar(100,255,255));
+    colors["White"] = make_pair(Scalar(0,0,80),Scalar(255,50,120));
+    colors["Yellow"] = make_pair(Scalar(15, 204, 204),Scalar(20, 255, 255));
+    colors["Red"] = make_pair(Scalar(0, 153, 127),Scalar(4, 230, 179));
+    colors["Orange"] =  make_pair(Scalar(15, 204, 204),Scalar(20, 255, 255));
+    colors["DarkYellow"] = make_pair(Scalar(20, 115, 140),Scalar(25, 205, 230));
+    colors["DarkYellow2"] = make_pair(Scalar(20, 90, 117),Scalar(32, 222, 222));
+    colors["LightGreen"] = make_pair(Scalar(78, 77, 128),Scalar(81, 217, 179));
 
-    weightedFilter = false;
-    positionPredictionWeight = 0.2;
-    positionObservationWeight = 0.8;
-    velocityPredictionWeight = 0.2;
-    velocityObservationWeight = 0.8;
-    averagedObservedVelocity = false;
-    backgroundSubtraction = false;
-    outlierRejection = false;
-
-
-
-    videoFilename = "juggling.mp4";
-
-    pixelsPerMeter = 700.0; // Just a guess from looking at the video (juggling.mp4)
-    // pixelsPerMeter = 980.0 // Just a guess from looking at the video (juggling2.mp4)
+    videoFilename = "/Users/bahermursi/GitHub/Trajectory-Predicition/juggling2.mp4";
     FPS = 30.0;
+    ACCELERATION = 10.0;
 
-    // Euler's method will proceed by timeStepSize / timeStepPrecision at a time
-    timeStepSize = 1.0 / FPS;
-    timeStepPrecision = 1.0;
+    if(colors.find(ballColor) != colors.end())
+        colorIter = colors.find(ballColor);
+    else
+        colorIter = colors.find("Red"); //default
 
-    // Number of Euler's method steps to take
-    eulerSteps = 18;
-
-    // Gravitational acceleration is in units of pixels per second squared
-    gSeconds = 9.81 * pixelsPerMeter;
-    // Per-timestep gravitational acceleration (pixels per timestep squared)
-    gTimesteps = gSeconds * (timeStepSize*timeStepSize);
 }
 
 void BallTracker::run(){
+    VideoCapture cap(videoFilename);
+    cap.set(CV_CAP_PROP_FRAME_WIDTH, 800);
+    cap.set(CV_CAP_PROP_FRAME_HEIGHT, 600);
+    Mat frame;
+    while(cap.isOpened()){
+        cap >> frame;
 
+        Mat mask, hsv;
+        vector<Point> positions;
+        Point2f center;
+        float radius = 0.0;
+        int centerX= INT_MIN;
+        int centerY = INT_MIN;
+
+        thresholding(frame,mask,hsv);
+        smoothNoise(mask);
+        getContours(mask);
+        getCenters(center,radius,centerX,centerY);
+        drawCircle(frame,center,radius,centerX,centerY);
+        calculateTrajectory(frame,positions,center);
+        drawTrajectory(frame,positions);
+        displayFrame(frame);
+    }
 }
 
-void BallTracker::getFrame(VideoCapture& cap, Mat& frame){
-    cap >> frame;
+
+void BallTracker::getCenters(Point2f& center,float& radius,int& centerX,int& centerY){
+    if (contours.size() > 0){
+        minEnclosingCircle(contours[largest_contour_index],center,radius);
+        Moments M = moments(contours[largest_contour_index],false);
+        if(M.m00 != 0){
+            centerX = int(M.m10 / M.m00);
+            centerY = int(M.m01 / M.m00);
+        }
+    }
 }
 
-void BallTracker::blur(const Mat& image, Mat& blurredImage){
+void BallTracker::blur( Mat& image, Mat& blurredImage){
     medianBlur(image,blurredImage, 5);
 }
-//position, velocity, acceleration, timeDelta
-void BallTracker::eulerExtrapolate(Point& position, Point& velocity, pair<float,float>& acceleration,float timeDelta){
+
+void BallTracker::thresholding(const Mat& frame,Mat& mask, Mat& hsv){
+    frame.copyTo(hsv);
+    GaussianBlur(hsv,hsv, Size(5,5),0);
+    cvtColor(frame,hsv,COLOR_BGR2HSV);
+    GaussianBlur(mask,mask,Size(5,5),0);
+    inRange(hsv, colorIter->second.first ,colorIter->second.second, mask);
+}
+
+void BallTracker::getContours(Mat& mask){
+    largest_area=0;
+    largest_contour_index=0;
+    findContours(mask.clone(), contours, hierarchy,CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
+    for( unsigned i = 0; i< contours.size(); i++ )
+    {
+        double a = contourArea(contours[i],false);
+        if(a > largest_area){
+            largest_area = a;
+            largest_contour_index = i;
+        }
+
+    }
+}
+
+void BallTracker::eulerExtrapolate(Point& position, Point& velocity, Point2f& acceleration,float timeDelta){
     position.x += velocity.x * timeDelta;
     position.y += velocity.y * timeDelta;
-    velocity.x += acceleration.first * timeDelta;
-    velocity.y += acceleration.second * timeDelta;
+    velocity.x += acceleration.x * timeDelta;
+    velocity.y += acceleration.y * timeDelta;
 }
 
-//def getTrajectory(initialPosition, initialVelocity, acceleration, timeDelta, numTrajPoints):
-//getTrajectory((centerX, centerY), (velocityX, velocityY), (0, gTimesteps), timeStepSize, eulerSteps)
-void BallTracker::getTrajectory( Point initialPosition, Point initialVelocity, Point& acceleration,float timeDelta, const vector<Point>& numTrajPoints,vector<Point>& positions ){
-    positions.push_back(initialPosition);
-    Point velocity = Point(initialVelocity.x,initialVelocity.y);
-    for (Point p : numTrajPoints){
-        eulerExtrapolate(p, velocity, acceleration, 1);
-        for (Point p : positions){
-            positions.push_back(p);
-        }
+void BallTracker::getTrajectory(Point initialPosition,Point initialVelocity,Point2f& acceleration,float timeDelta,int numTrajPoints,vector<Point>& positions){
+    Point position = initialPosition;
+    Point velocity = initialVelocity;
+    for (int i = 0; i < numTrajPoints; ++i){
+        eulerExtrapolate(position, velocity, acceleration, timeDelta);
+        positions.push_back(position);
     }
 }
 
-void BallTracker::getContours(const Mat& mask){
-    findContours(mask.clone(), contours, hierarchy,CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
-}
-
-void BallTracker::rejectOutlierPoints(const vector<Point>& points,vector<Point>& nonOutliers, int m){
-    if (points.size() == 0)
-        return;
-    else{
-        double meanX{0};
-        double meanY{0};
-        for(Point p : points){
-            meanX += p.x;
-            meanY+=p.y;
-        }
-        meanX /=points.size();
-        meanY/=points.size();
-
-        double accumX = 0.0;
-        double accumY = 0.0;
-        std::for_each (std::begin(points), std::end(points), [&](const Point p) {
-            accumX += (p.x - m) * (p.x - m);
-            accumY += (p.y - m) * (p.y - m);
-        });
-        double stdevX = sqrt(accumX / (points.size()-1));
-        double stdevY = sqrt(accumY / (points.size()-1));
-        for(Point pnt : points){
-            if ((abs(pnt.x - meanX) < stdevX * m) && (abs(pnt.y - meanY) < stdevY * m)){
-                nonOutliers.push_back(pnt);
-            }
-        }
-    }
-}
-
-
-vector<int> BallTracker::estimateVelocity(Point pnt1 , Point pnt2,bool normalized){
+Point BallTracker::estimateVelocity(Point pnt1 , Point pnt2,bool normalized){
     if (normalized){
         double mag = sqrt(pow((pnt2.x - pnt1.x),2) + pow((pnt2.y - pnt1.y),2));
-        return {int((pnt2.x - pnt1.x) / mag),int((pnt2.y - pnt1.y) / mag)};
+        return Point(int((pnt2.x - pnt1.x) / mag),int((pnt2.y - pnt1.y) / mag));
     }
     else{
-        return {(pnt2.x - pnt1.x),(pnt2.y - pnt1.y)};
+        return Point((pnt2.x - pnt1.x),(pnt2.y - pnt1.y));
     }
 }
 
-void BallTracker::processForThresholding(const Mat& frame, Mat& hsvBlurredFrame){
-    //     Mat blurredFrame;
-    //     blur(frame,blurredFrame);
-
-    if (backgroundSubtraction){
-        // Subtract background (makes isolation of balls more effective, in combination with thresholding)
-        BackgroundSubtractorMOG mog;
-        Mat fgMaskMOG;
-        mog(frame, fgMaskMOG);
-        bitwise_and(frame,frame,frame,fgMaskMOG);
-    }
-    // Convert to HSV color space
-    cvtColor(frame,hsvBlurredFrame, COLOR_BGR2HSV);
+void BallTracker::smoothNoise(Mat& mask){
+    erode(mask, mask, 2 );
+    dilate( mask, mask,2 );
 }
 
-void BallTracker::smoothNoise(Mat& src){
-    erode(src, src, Mat());
-    dilate(src, src, Mat());
-}
-
-void BallTracker::initializeBallStates(vector<Point>& ballCenters,vector<Point>& ballVelocities){
-    for(int i = 0; i < numballs; ++i){
-        ballCenters.push_back(Point(0,0));
-        ballVelocities.push_back(Point(0,0));
-    }
-}
-
-float BallTracker::distance4D(const Point p,const Point q, const Point r, const Point s){
-    return sqrt(pow((p.x - q.x),2) + pow((p.y - q.y),2) + pow((r.x - s.x),2) + pow((r.y - s.y),2));
-}
-
-float BallTracker::distance2D(const Point p,const Point q){
+float BallTracker::distance2D( Point p, Point q){
     return sqrt(pow((p.x - q.x),2) + pow((p.y - q.y),2));
 
 }
-vector<Point> BallTracker:: findBallsInImage(const Mat& image, const vector<Point>& ballCenters, const vector<Point>& ballVelocities){
 
-    unsigned numBallsToFind = ballCenters.size();
-    vector<Point> unFilteredpoints;
-    vector<Point> points;
-    // Get a list of all of the non-blank points in the image
-    for(int row = 0; row < image.rows; ++row)
-        for(int col = 0; col < image.cols; ++col)
-            if(image.at<uchar>(row,col) != 0)
-                unFilteredpoints.push_back(Point(row,col));
-
-    if (outlierRejection){
-        // Filter out positional outliers
-        rejectOutlierPoints(unFilteredpoints,points);
-    }
-
-    if (points.size() == 0)
-        return{};
-
-    vector<int> labels;
-    Mat centers;
-    if (points.size() >= numBallsToFind){
-
-        // Break into clusters using k-means clustering
-
-        TermCriteria criteria = TermCriteria( TermCriteria::EPS + TermCriteria::MAX_ITER, 10, 1.0);
-        double compactness = kmeans(points,numBallsToFind,labels, criteria, 10, KMEANS_RANDOM_CENTERS,centers);
-
-        AttributesContainer pairings;
-        vector<pair<Point,Point>> ballAttr;
-        unsigned minLength = min(ballCenters.size(),ballVelocities.size());
-        for(unsigned i = 0; i < minLength; ++i){
-            ballAttr.push_back(make_pair(ballCenters[i],ballVelocities[i]));
+void BallTracker::drawCircle(Mat& frame,Point2f& center,float& radius,int& centerX,int& centerY){
+    if (radius > 10){
+        if(centerX != INT_MIN || centerY != INT_MIN){
+            circle(frame, center, int(radius),Scalar(0, 255, 255), 2);
+            circle(frame, Point(centerX,centerY), 5, Scalar(0, 0, 255), -1);
         }
-        for (unsigned i = 0; i < ballAttr.size(); i++){
-            for (unsigned j = 0; j < centers.cols; j++){
-                Point ballCenter = ballAttr[i].first;
-                Point ballVelocity = ballAttr[i].second;
-                Point center = centers.at<Point>(0,j);
-                Point theoreticalVelocity = Point(center.x - ballCenter.x, center.y - ballCenter.y );
-                double distance = distance4D(ballCenter, center, theoreticalVelocity, theoreticalVelocity);
-                pairings.push(make_pair(ballCenter,ballVelocity), make_pair(center, theoreticalVelocity), distance);
-            }
-        }
-        pairings.sortContainer();
-        vector<AttributesContainer::MyPair> min_matches = pairings.filterRepeatitions();
-        return min_matches;
     }
-    else
-        return {};
-
-}
-bool BallTracker::isEqual(Point p1, Point p2){
-    return p1.x == p2.x && p1.y == p2.y;
 }
 
-void BallTracker::drawBallsAndTrajectory(Mat& frameCopy, const  vector<AttributesContainer::MyPair>& matches, vector<Point>& ballCenters, vector<Point>& ballVelocities, const vector<Point>& ballIndices, const vector<Point>& ballCentersToPair, const vector<Point>& ballVelocitiesToPair){
-    if (matches.size() == 0)
-        return ;
-    int globalIndex;
-    map<int,bool> matchedIndices;
-    for ( AttributesContainer::MyPair match : matches){
-        bool matched = false;
-        unsigned minLength = min(ballCentersToPair.size(),ballVelocitiesToPair.size());
-        for(unsigned i = 0; i < minLength; ++i){
-            if (isEqual(match.p1.first,ballCentersToPair[i]) && isEqual(match.p2.second,ballCentersToPair[i]) && (matchedIndices.find(i) == matchedIndices.end())  && !matched){
-                globalIndex = ballIndices[i];
-                matchedIndices[globalIndex] = true;
-                Point previousPosition = ballCenters[globalIndex];
-                Point previousVelocity = ballVelocities[globalIndex];
-                Point observedPosition = match.p2.first;
-                Point observedVelocity = Point(observedPosition.x - previousPosition.x, observedPosition.y - previousPosition.y);
-                if (averagedObservedVelocity)
-                    observedVelocity = Point((observedPosition.x + ballVelocities[globalIndex].x) / 2.0, (observedVelocity.y + ballVelocities[globalIndex].y) / 2.0);
-                if (weightedFilter){
-                    // Predict uncertainty for this timestep
-                    Point predictedPosition = Point(previousPosition.x + previousVelocity.x, previousPosition.y + previousVelocity.y);
-                    Point predictedVelocity = Point(previousVelocity.x, previousVelocity.y + gTimesteps);
-                    // Update estimated state
-                    ballCenters[globalIndex] = Point(predictedPosition.x*positionPredictionWeight + observedPosition.x*positionObservationWeight, predictedPosition.y*positionPredictionWeight + observedPosition.y*positionObservationWeight);
-                    ballVelocities[globalIndex] = Point(predictedVelocity.x*velocityPredictionWeight + observedVelocity.x*velocityObservationWeight, predictedVelocity.y*velocityPredictionWeight + observedVelocity.y*velocityObservationWeight);
+void BallTracker::calculateTrajectory(Mat& frame,vector<Point>& positions,Point2f center){
+    vector<Point>::iterator it = pnts.begin();
+    pnts.insert (it , center);
+    ballVelocities = estimateVelocity(ballCenters,center);
+    ballCenters = center;
+    circle(frame, center, 6, Scalar(200,0,0), 6);
 
-                }
-                else{
-                    // Just use observed positions and velocities
-                    ballCenters[globalIndex] = observedPosition;
-                    ballVelocities[globalIndex] = observedVelocity;
-                }
-                matchedIndices[i] = true;
-                matched = true;
+    Point2f pf(0, ACCELERATION);
+    getTrajectory(ballCenters, ballVelocities, pf, 0.100, 60,positions);
 
-            }
+}
+
+void BallTracker::drawTrajectory(Mat& frame,vector<Point>& positions){
+    for (Point position : positions){
+        if (position.x < frame.cols && position.y < frame.rows){
+            circle(frame,position, 3, Scalar(255,55,55),2);
         }
     }
-    vector<Point> positions;
-    for (int i = 0; i < ballIndices.size(); ++i){
-        Point center = Point(ballCenters[i].x, ballCenters[i].y);
-        Point velocity = Point(ballVelocities[i].x,ballVelocities[i].y);
-        circle(frameCopy,center, 6, ballPositionMarkerColors[i], 6);
-        //  getTrajectory(const Point initialPosition,const Point initialVelocity, Point& acceleration,float timeDelta,
-        //  const vector<Point>& numTrajPoints,);
-        getTrajectory(center, velocity, pair<0.0, gTimesteps>, timeStepSize, eulerSteps,positions);
+}
 
-        for( Point position : positions){
-            // height, width, depth = frameCopy.shape
-            if (position.x < frameCopy.cols && position.y < frameCopy.rows)
-                circle(frame, position, 2, ballTrajectoryMarkerColors[i], 2);
-        }
-        // Draw velocity vectors
-        //cv2.arrowedLine(frameCopy, (int(centerX), int(centerY)), (int(ballCenters[i][0]+ballVelocities[i][0]*2), int(ballCenters[i][1]+ballVelocities[i][1]*2)), ballTrajectoryMarkerColors[i], 2, 2, 0, 0.1)
-    }
-
-
+void BallTracker::displayFrame(Mat& frame){
+    imshow("Image with Estimated Ball Center", frame);
+    waitKey(FPS);
 }
