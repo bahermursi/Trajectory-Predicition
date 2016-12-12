@@ -9,21 +9,22 @@ using namespace cv;
 class BallTracker
 {
 public:
-    BallTracker(string);
+    BallTracker(string,string,bool cam = false);
     void run();
     void blur( Mat& image, Mat& blurredImage);
     void getContours( Mat&);
     Point estimateVelocity(Point , Point,bool normalized = false);
     void smoothNoise(Mat&);
     float distance2D(Point, Point);
-    void getCenters(Point2f&,float&,int&,int&);
+    void getCenters(Point2f&,float&,int&,int&,int);
     void drawCircle(Mat&,Point2f& ,float&,int&,int&);
     void drawTrajectory(Mat&,vector<Point>&);
     void calculateTrajectory(Mat& frame,vector<Point>&,Point2f);
     void displayFrame(Mat&);
-    void eulerExtrapolate(Point& position, Point& velocity, Point2f& acceleration,float timeDelta);
+    void euler(Point& position, Point& velocity, Point2f& acceleration,float timeDelta);
     void getTrajectory(Point initialPosition,Point initialVelocity,Point2f& acceleration,float timeDelta,int numTrajPoints,vector<Point>& positions);
     void thresholding(const Mat& ,Mat& , Mat& );
+
 
 private:
 
@@ -32,15 +33,22 @@ private:
     int numballs;
     float FPS;
     float ACCELERATION;
-    vector<Point> pnts;
-    string videoFilename;
-    Point ballCenters = Point(0,0);
-    Point ballVelocities = Point(0,0);
-    map<string, pair<Scalar,Scalar>> colors;
-    vector<std::vector<Point>> contours;
-    vector<Vec4i> hierarchy;
-    map<string, pair<Scalar,Scalar>>::iterator colorIter;
+    float PIXEL_PER_METER;
+    float timeStepSize;
+    float TIME_STEP_PREC;
+    float EULER_STEPS;
+    float  gSeconds;
+    float  gTimesteps;
 
+vector<Point> pnts;
+string videoFilename;
+Point ballCenters = Point(0,0);
+Point ballVelocities = Point(0,0);
+map<string, pair<Scalar,Scalar>> colors;
+vector<std::vector<Point>> contours;
+vector<Vec4i> hierarchy;
+bool openCam;
+map<string, pair<Scalar,Scalar>>::iterator colorIter;
 
 };
 

@@ -4,7 +4,7 @@
 #include <QPainter>
 using namespace std;
 
-BallTracker::BallTracker(String ballColor) : numballs(1)
+BallTracker::BallTracker(String ballColor,string filename,bool cam) :openCam(cam), numballs(1)
 {
     colors["DarkGreen"] = make_pair(Scalar(35,50,20),Scalar(80,255,120));
     colors["Green"] = make_pair(Scalar(30,0,0),Scalar(100,255,255));
@@ -15,10 +15,13 @@ BallTracker::BallTracker(String ballColor) : numballs(1)
     colors["DarkYellow"] = make_pair(Scalar(20, 115, 140),Scalar(25, 205, 230));
     colors["DarkYellow2"] = make_pair(Scalar(20, 90, 117),Scalar(32, 222, 222));
     colors["LightGreen"] = make_pair(Scalar(78, 77, 128),Scalar(81, 217, 179));
+    colors["Tennis"] = make_pair(Scalar(40, 86, 6),Scalar(64, 255, 255));
+    colors["Blue"] = make_pair(Scalar(110, 70, 100),Scalar(130, 255, 255));
+    colors["TennisGreen"] = make_pair(Scalar(0, 103, 146),Scalar(179, 255, 255));
 
-    videoFilename = "/Users/bahermursi/GitHub/Trajectory-Predicition/juggling2.mp4";
+    videoFilename = filename;
     FPS = 30.0;
-    ACCELERATION = 10.0;
+    ACCELERATION = 11;
 
     if(colors.find(ballColor) != colors.end())
         colorIter = colors.find(ballColor);
@@ -28,7 +31,12 @@ BallTracker::BallTracker(String ballColor) : numballs(1)
 }
 
 void BallTracker::run(){
-    VideoCapture cap(videoFilename);
+    VideoCapture cap;
+    if (openCam)
+        cap.open(0);
+    else
+        cap.open((videoFilename));
+
     cap.set(CV_CAP_PROP_FRAME_WIDTH, 800);
     cap.set(CV_CAP_PROP_FRAME_HEIGHT, 600);
     Mat frame;
@@ -45,24 +53,27 @@ void BallTracker::run(){
         thresholding(frame,mask,hsv);
         smoothNoise(mask);
         getContours(mask);
-        getCenters(center,radius,centerX,centerY);
-        drawCircle(frame,center,radius,centerX,centerY);
-        calculateTrajectory(frame,positions,center);
-        drawTrajectory(frame,positions);
+        if(largest_area > 0){
+            getCenters(center,radius,centerX,centerY,largest_contour_index);
+            drawCircle(frame,center,radius,centerX,centerY);
+            calculateTrajectory(frame,positions,center);
+            drawTrajectory(frame,positions);
+        }
         displayFrame(frame);
     }
 }
 
 
-void BallTracker::getCenters(Point2f& center,float& radius,int& centerX,int& centerY){
+void BallTracker::getCenters(Point2f& center,float& radius,int& centerX,int& centerY,int largestInd){
     if (contours.size() > 0){
-        minEnclosingCircle(contours[largest_contour_index],center,radius);
-        Moments M = moments(contours[largest_contour_index],false);
+        minEnclosingCircle(contours[largestInd],center,radius);
+        Moments M = moments(contours[largestInd],false);
         if(M.m00 != 0){
             centerX = int(M.m10 / M.m00);
             centerY = int(M.m01 / M.m00);
         }
     }
+    contours.empty();
 }
 
 void BallTracker::blur( Mat& image, Mat& blurredImage){
@@ -73,7 +84,7 @@ void BallTracker::thresholding(const Mat& frame,Mat& mask, Mat& hsv){
     frame.copyTo(hsv);
     GaussianBlur(hsv,hsv, Size(5,5),0);
     cvtColor(frame,hsv,COLOR_BGR2HSV);
-    GaussianBlur(mask,mask,Size(5,5),0);
+    //GaussianBlur(mask,mask,Size(5,5),0);
     inRange(hsv, colorIter->second.first ,colorIter->second.second, mask);
 }
 
@@ -92,7 +103,7 @@ void BallTracker::getContours(Mat& mask){
     }
 }
 
-void BallTracker::eulerExtrapolate(Point& position, Point& velocity, Point2f& acceleration,float timeDelta){
+void BallTracker::euler(Point& position, Point& velocity, Point2f& acceleration,float timeDelta){
     position.x += velocity.x * timeDelta;
     position.y += velocity.y * timeDelta;
     velocity.x += acceleration.x * timeDelta;
@@ -103,7 +114,7 @@ void BallTracker::getTrajectory(Point initialPosition,Point initialVelocity,Poin
     Point position = initialPosition;
     Point velocity = initialVelocity;
     for (int i = 0; i < numTrajPoints; ++i){
-        eulerExtrapolate(position, velocity, acceleration, timeDelta);
+        euler(position, velocity, acceleration, timeDelta);
         positions.push_back(position);
     }
 }
@@ -140,12 +151,13 @@ void BallTracker::drawCircle(Mat& frame,Point2f& center,float& radius,int& cente
 void BallTracker::calculateTrajectory(Mat& frame,vector<Point>& positions,Point2f center){
     vector<Point>::iterator it = pnts.begin();
     pnts.insert (it , center);
+
     ballVelocities = estimateVelocity(ballCenters,center);
     ballCenters = center;
     circle(frame, center, 6, Scalar(200,0,0), 6);
 
     Point2f pf(0, ACCELERATION);
-    getTrajectory(ballCenters, ballVelocities, pf, 0.100, 60,positions);
+    getTrajectory(ballCenters, ballVelocities, pf, 0.100, 60, positions);
 
 }
 
@@ -155,6 +167,7 @@ void BallTracker::drawTrajectory(Mat& frame,vector<Point>& positions){
             circle(frame,position, 3, Scalar(255,55,55),2);
         }
     }
+
 }
 
 void BallTracker::displayFrame(Mat& frame){
