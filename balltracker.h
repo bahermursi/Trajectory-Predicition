@@ -33,22 +33,15 @@ private:
     int numballs;
     float FPS;
     float ACCELERATION;
-    float PIXEL_PER_METER;
-    float timeStepSize;
-    float TIME_STEP_PREC;
-    float EULER_STEPS;
-    float  gSeconds;
-    float  gTimesteps;
-
-vector<Point> pnts;
-string videoFilename;
-Point ballCenters = Point(0,0);
-Point ballVelocities = Point(0,0);
-map<string, pair<Scalar,Scalar>> colors;
-vector<std::vector<Point>> contours;
-vector<Vec4i> hierarchy;
-bool openCam;
-map<string, pair<Scalar,Scalar>>::iterator colorIter;
+    vector<Point> pnts;
+    string videoFilename;
+    Point ballCenters = Point(0,0);
+    Point ballVelocities = Point(0,0);
+    map<string, pair<Scalar,Scalar>> colors;
+    vector<std::vector<Point>> contours;
+    vector<Vec4i> hierarchy;
+    bool openCam;
+    map<string, pair<Scalar,Scalar>>::iterator colorIter;
 
 };
 

@@ -32,7 +32,9 @@ BallTracker::BallTracker(String ballColor,string filename,bool cam) :openCam(cam
 
 void BallTracker::run(){
     VideoCapture cap;
+
     if (openCam)
+
         cap.open(0);
     else
         cap.open((videoFilename));

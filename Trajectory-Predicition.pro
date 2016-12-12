@@ -19,7 +19,8 @@ SOURCES += main.cpp\
     balltracker.cpp
 
 HEADERS  += \
-    balltracker.h
+    balltracker.h \
+    ui_mainwindow.h
 
 FORMS    += mainwindow.ui
 
