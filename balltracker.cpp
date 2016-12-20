@@ -1,7 +1,4 @@
 #include "balltracker.h"
-#include <tuple>
-#include <QImage>
-#include <QPainter>
 using namespace std;
 
 BallTracker::BallTracker(String ballColor,string filename,bool cam) :openCam(cam), numballs(1)
@@ -23,21 +20,23 @@ BallTracker::BallTracker(String ballColor,string filename,bool cam) :openCam(cam
     FPS = 30.0;
     ACCELERATION = 11;
 
-    if(colors.find(ballColor) != colors.end())
+    if(colors.find(ballColor) != colors.end()){
         colorIter = colors.find(ballColor);
-    else
+    }
+    else {
         colorIter = colors.find("Red"); //default
-
+    }
 }
 
 void BallTracker::run(){
     VideoCapture cap;
 
-    if (openCam)
-
+    if (openCam){
         cap.open(0);
-    else
+    }
+    else {
         cap.open((videoFilename));
+    }
 
     cap.set(CV_CAP_PROP_FRAME_WIDTH, 800);
     cap.set(CV_CAP_PROP_FRAME_HEIGHT, 600);
@@ -86,7 +85,6 @@ void BallTracker::thresholding(const Mat& frame,Mat& mask, Mat& hsv){
     frame.copyTo(hsv);
     GaussianBlur(hsv,hsv, Size(5,5),0);
     cvtColor(frame,hsv,COLOR_BGR2HSV);
-    //GaussianBlur(mask,mask,Size(5,5),0);
     inRange(hsv, colorIter->second.first ,colorIter->second.second, mask);
 }
 
@@ -94,14 +92,13 @@ void BallTracker::getContours(Mat& mask){
     largest_area=0;
     largest_contour_index=0;
     findContours(mask.clone(), contours, hierarchy,CV_RETR_EXTERNAL, CV_CHAIN_APPROX_SIMPLE);
-    for( unsigned i = 0; i< contours.size(); i++ )
+    for(unsigned i = 0; i< contours.size(); i++ )
     {
         double a = contourArea(contours[i],false);
         if(a > largest_area){
             largest_area = a;
             largest_contour_index = i;
         }
-
     }
 }
 
@@ -138,7 +135,6 @@ void BallTracker::smoothNoise(Mat& mask){
 
 float BallTracker::distance2D( Point p, Point q){
     return sqrt(pow((p.x - q.x),2) + pow((p.y - q.y),2));
-
 }
 
 void BallTracker::drawCircle(Mat& frame,Point2f& center,float& radius,int& centerX,int& centerY){
@@ -160,7 +156,6 @@ void BallTracker::calculateTrajectory(Mat& frame,vector<Point>& positions,Point2
 
     Point2f pf(0, ACCELERATION);
     getTrajectory(ballCenters, ballVelocities, pf, 0.100, 60, positions);
-
 }
 
 void BallTracker::drawTrajectory(Mat& frame,vector<Point>& positions){
@@ -169,7 +164,6 @@ void BallTracker::drawTrajectory(Mat& frame,vector<Point>& positions){
             circle(frame,position, 3, Scalar(255,55,55),2);
         }
     }
-
 }
 
 void BallTracker::displayFrame(Mat& frame){
